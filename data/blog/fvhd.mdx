@@ -7,4 +7,8 @@ summary: 'FVHD is a method for efficient visualization of high-dimensional data 
 authors: ['langMonk']
 ---
 
-# FVHD Starter
+# The Need for Efficient High-Dimensional Data Visualization
+
+Fast visual exploration of large high-dimensional data (HDD) plays a crucial role in various scientific fields requiring insights into the interrelationships between numerous objects. Existing dimensionality reduction (DR) methods with super-linear computational and memory complexity $O(M)$ become expensive when visualizing large datasets containing millions of feature vectors. The visualization of very large HDD is well approximated by the two-dimensional problem of embedding undirected *k*NN graphs.
+
+FVHD effectively preserves both local relationships and the global topological structure of high-dimensional data through three key simplifications: dramatically reducing the number of nearest neighbors _nn_, randomly selecting a single negative sample (in most cases), and implementing binary distances between samples along with a simplified loss function. Although FVHD underperforms in embeddings quality compared to its competitors for moderately sized datasets (fewer than $10^5$ samples), this relatively descent loss of precision more than pays for itself. FVHD significantly outpaces state-of-the-art algorithms in processing multimillion datasets, where it demonstrates its efficiency as baseline methods fail to complete within a reasonable computational time.

@@ -1,14 +1,148 @@
 ---
 title: 'FVHD: Fast Visualization of High-Dimensional Data'
-date: '2025-02-04'
+date: '2025-02-06'
 tags: ['gpu', 'data-visualization', 'data-embedding']
 draft: false
 summary: 'FVHD is a method for efficient visualization of high-dimensional data using force-directed graph layout algorithms. It provides an implementation of high-dimensional data visualization with neighbor-based force calculations.'
 authors: ['langMonk']
 ---
 
-# The Need for Efficient High-Dimensional Data Visualization
+# Introduction
 
 Fast visual exploration of large high-dimensional data (HDD) plays a crucial role in various scientific fields requiring insights into the interrelationships between numerous objects. Existing dimensionality reduction (DR) methods with super-linear computational and memory complexity $O(M)$ become expensive when visualizing large datasets containing millions of feature vectors. The visualization of very large HDD is well approximated by the two-dimensional problem of embedding undirected *k*NN graphs.
 
+In the world of unsupervised HDD embedding, Flt-SNE [1] and UMAP [2] are among the most widely adopted techniques.
+The former algorithm resembles the classical Multidimensional Scaling (MDS) [3], but instead of a simple loss function based on the cumulative L2 (or other Minkowski metric) discrepancies between the distances in the source and target spaces, t-SNE assesses the probability distributions of neighboring data vectors using Kullback-Leibler (K-L) divergence and consolidates these assessments to compute the actual embedding error. These probability distributions reflect the neighborhood of each data vector in the source and target spaces, with the highest probability assigned to the nearest neighbors (and its value decreasing rapidly in the case of the more distant elements). A significant advancement came with Flt-SNE, which achieves linear complexity $O(M)$ by approximating the repulsive forces between points using interpolation on an equispaced grid and the Fast Fourier Transform. This interpolation-based approach maintains the quality of original t-SNE while dramatically reducing computational complexity, making it the current standard for large-scale t-SNE applications.
+
+<TOCInline toc={props.toc} exclude="Introduction" />
+
+# Core concepts
+
 FVHD effectively preserves both local relationships and the global topological structure of high-dimensional data through three key simplifications: dramatically reducing the number of nearest neighbors _nn_, randomly selecting a single negative sample (in most cases), and implementing binary distances between samples along with a simplified loss function. Although FVHD underperforms in embeddings quality compared to its competitors for moderately sized datasets (fewer than $10^5$ samples), this relatively descent loss of precision more than pays for itself. FVHD significantly outpaces state-of-the-art algorithms in processing multimillion datasets, where it demonstrates its efficiency as baseline methods fail to complete within a reasonable computational time.
+
+One can apply various dimensionality reduction (_DR_) methods that reduce the number of dimensions in the data while preserving the essential local and global topological properties. _DR_ involves transforming the _N_-dimensional _ND_ dataset $\mathbf{X} = \{x_{i}\}_{i=1,\dots M} \in {\Re}^{N}$ into its _n_-dimensional representation $\mathbf{Y} = \{y_{i}\}_{i=1,\dots M} \in \Re^{n}$, where \($n << N$), and _M_ represents the number of *N*D feature vectors (or their corresponding *n*D embeddings).
+
+This embedding can be perceived as a lossy data compression, achieved by minimizing a loss function $E(|\mathbf{X}-\mathbf{Y}|)$, where $(|\cdot|)$ measures the topological dissimilarity between $\mathbf{X}$ and $\mathbf{Y}$. Due to the high complexity of the low-dimensional manifold, immersed in the *N*D feature space and occupied by data samples $\mathbf{X}$, the perfect embedding of $\mathbf{X}$ in $\mathbf{Y}$ is possible only for trivial cases. In the context of _HDD_ visualization, we typically assume dimensions $n=2$ or $n=3$. However, some DR techniques, such as UMAP, serve as more versatile DR methods applicable across various settings.
+
+- FVHD, optimizes and refines the IVHD approach.
+
+- FVHD's is theoretically connected to t-SNE and UMAP. All three methods fundamentally operate as *k*NN graph embeddings. We show how FVHD achieves its minimalist implementation through three key design choices:
+
+  1.  Simplified loss function optimization
+  2.  Binary distance representation
+  3.  Reduced nearest neighbor set
+
+- Despite its simplicity, FVHD effectively preserves both local relationships and global topology across datasets of varying sizes.
+
+- FVHD's shows substantial performance advantages over existing methods, particularly for large-scale datasets.
+
+### Loss function
+
+It utilizes classical MDS stress function. However, the number and sort of distances FVHD employs are radically different than those in classical MDS and the baseline algorithms. Let $O_{\text{nn}}(i)$ and $O_{\text{rn}}(i)$ will be the sets of indices of $nn$ nearest (connected) neighbors and $rn$ (unconnected) random neighbors of a feature vector $x_i$ in $k$NN graph, respectively. We define binary dissimilarity measure as follows (see Figure 1b):
+
+$$
+\forall x_i \in \mathbf{X}:D_{ij}=
+\begin{cases}
+0 & \text{if } j \in O_{\text{nn}}(i) \\
+1 & \text{if } j \in O_{\text{rn}}(i)
+\end{cases}
+$$
+
+Thus, unlike in the baseline algorithms, we are not interested even in an approximated ordering of $k$NNs for each $x_i\in \mathbf{X}$.
+Instead of using the $O(M^2)$ floating point matrix $\textbf{D}$ as input, we work with $O(nn\cdot M)$ integers that represent the list of $k$NN graph edges. Indices for a random subset of neighbors ($rn$) can be dynamically generated during the embedding process. Consequently, embedding high-dimensional data effectively becomes the embedding of the corresponding sparse $k$NN graph. To achieve this and assuming the above equation, we minimize the following loss function:
+
+$$
+E(|\textbf{D}-\textbf{d}|) = \sum_i \ \sum_{j\in O_{\text{nn}}(i)\cup O_{\text{rn}}(i)}
+\begin{cases}
+d_{ij}^{2} & \text{if } j \in O_{\text{nn}}(i) \\
+c\cdot(1-d_{ij})^{2} & \text{if } j \in O_{\text{rn}}(i)
+\end{cases}
+$$
+
+This equation measures the discrepancy between binary dissimilarities $D_{ij}\in {0,1}$ and the corresponding Euclidean distances $d_{ij}$, where $i,j=1, \dots, M$, and $c\in(0,1)$ is a scaling factor for distances involving randomly chosen neighbors. The FVHD method utilizes this stress function, which is simpler to optimize compared to the Kullback-Leibler (KL) divergence-based loss functions typically used in baseline algorithms.
+
+### Optimization
+
+To minimize $E(.)$, FVHD uses a force-directed approach based on interacting particles. The vertices $v_{i}$ in $\mathbb{R}^2$ are treated as particles evolving according to discretized Newtonian equations of motion, starting from random positions. At each timestep $n$, forces $f_{i}^{n}=-\nabla E_{i}$ from neighboring vertices in $O_{nn}(i)$ and $O_{rn}(i)$ are calculated for each particle $i$, along with a friction term $-\lambda\textbf{v}{n}^{i}$. The particle velocities $v{i}^{n}$ and positions $r_{i}^{n}$ are then updated using the leap-frog numerical scheme with timestep $\Delta t$.
+
+$$
+    \mathbf{v_{i}}^{n + \frac{1}{2}} = \mathbf{v_{i}}^{n - \frac{1}{2}} + (2 k_{nn}\mathbf{f}^{n}_{i} - \lambda \mathbf{v_{i}}^{n}) \cdot \Delta t
+$$
+
+$$
+    \mathbf{r_{i}}^{n + 1} = \mathbf{r_{i}}^{n} + \mathbf{v_{i}}^{n + \frac{1}{2}} \cdot \Delta t
+$$
+
+$$
+    \mathbf{v_{i}}^{n} = \frac{ \mathbf{v_{i}}^{n + \frac{1}{2}} + \mathbf{v_{i}}^{n - \frac{1}{2}}}{2}
+$$
+
+$$
+    \mathbf{f_{i}}^{n} = - \sum^{nn}_{j \in \textit{O}_{nn}(i)} r^{n}_{ij} - c \sum^{rn}_{k \in \textit{O}_{rn}(i)} (1 - d_{ik}^{n}) \cdot \frac{r^{n}_{ik}}{d^{n}_{ik}}, \;\;\; r^{n}_{ik} = \mathbf{r}^{n}_{i} - \mathbf{r}^{n}_{k}
+$$
+
+These equations can be simplified by the following substitutions:
+
+$$
+    a \leftarrow \frac{1 - \frac{\lambda \Delta t}{2}}{1 + \frac{\lambda \Delta t}{2}}, \;\;\; b \leftarrow \frac{2k_{nn} \Delta t^2}{1 + \frac{\lambda \Delta t}{2}}, \;\;\; \Delta \mathbf{r_{i}}^{n+1} = \mathbf{r_{i}}^{n+1} - \mathbf{r_{i}}^{n}
+$$
+
+Finally, we obtain the following scheme:
+
+$$
+    \mathbf{v_i} = \Delta \mathbf{r_i} \leftarrow a \cdot \Delta \mathbf{r_i} + b \cdot \mathbf{f_i} = a \cdot \mathbf{v_i} + b \cdot \mathbf{f_i}
+$$
+
+$$
+    \mathbf{r_i} \leftarrow \mathbf{r_i} + \Delta \mathbf{r_i}
+$$
+
+# Experiments
+
+FVHD is versioned using pip distribution package: https://pypi.org/project/fvhd/
+
+```shell
+pip install fvhd
+```
+
+A sample code for generating visualizations is as follows:
+
+```python
+import torch
+from fvhd import FVHD
+from knn import Graph, NeighborConfig, NeighborGenerator
+
+X = torch.rand(1000, 784)
+
+config = NeighborConfig(metric="euclidean")
+generator = NeighborGenerator(df=df, config=config)
+graph = generator.run(nn=5)
+
+fvhd = FVHD(
+    n_components=2,  # Output dimensionality
+    nn=5,           # Number of nearest neighbors
+    rn=2,           # Number of random neighbors
+    c=0.1,        # Repulsion strength
+    eta=0.2,      # Learning rate
+    epochs=3000,
+    device="cuda",  # Use GPU if available
+    velocity_limit=True,
+    autoadapt=True
+)
+
+embeddings = fvhd.fit_transform(X, graph)
+```
+
+# References
+
+[1]: G. C. Linderman, M. Rachh, J. G. Hoskins, S. Steinerberger, Y. Kluger,
+Fast interpolation-based t-SNE for improved visualization of single-cell
+RNA-seq data, Nature Methods 16 (3) (2019) 243–245.
+
+[2]: C. J. Nolet, V. Lafargue, E. Raff, T. Nanditale, T. Oates, J. Zedlewski,
+J. Patterson, Bringing umap closer to the speed of light with gpu accel-
+eration, Proceedings of the AAAI Conference on Artificial Intelligence
+35 (1) (2021) 418–426.
+
+[3]: B. Ghojogh, A. Ghodsi, F. Karray, M. Crowley, Multidimensional scaling,
+sammon mapping, and isomap: Tutorial and survey (2020).

@@ -183,9 +183,13 @@ embeddings = fvhd.fit_transform(X, graph)
 torch.save(embeddings, "fvhd_embeddings_google_news.pt")
 ```
 
-<p align="center">
-  <img src="/static/images/fvhd/fvhd_big_data.png" />
-</p>
+<div className="flex justify-center">
+  <img
+    src={`${process.env.BASE_PATH || ''}/static/images/fvhd/fvhd_big_data.png`}
+    alt="FVHD big data visualization"
+    className="mx-auto block max-w-full h-auto"
+  />
+</div>
 
 ---
 
